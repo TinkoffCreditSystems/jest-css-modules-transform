@@ -1,6 +1,9 @@
+/* eslint-disable class-methods-use-this, prefer-named-capture-group */
+const {extractICSS} = require('icss-utils');
 const {camelCase, snakeCase} = require('lodash');
 const postcss = require('postcss');
-const {extractICSS} = require('icss-utils');
+const process = require('process');
+
 const REG_EXP_NAME_BREAK_CHAR = /[\s,.{/#[:]/;
 
 module.exports = class Parser {
@@ -8,8 +11,28 @@ module.exports = class Parser {
         this._cssLoaderConfig = cssLoaderConfig;
     }
 
-    pushToResult(result, className) {
-        switch ((this._cssLoaderConfig || {}).exportLocalsStyle) {
+    getLocalIdent(path) {
+        let localIdent;
+
+        ['/src/', '/packages/', '/node_modules/', process.cwd()].forEach((marker) => {
+            const index = path.indexOf(marker);
+            if (undefined === localIdent && index > -1) {
+                localIdent = path.substring(index + marker.length)
+                    .replace(/(^[\W]*|_|\.\w+$)/g, '')
+                    .replace(/[/\\]/g, '-');
+            }
+        });
+
+        if (undefined === localIdent) {
+            throw new Error(`Cannot create localIdent for the file: ${path}`);
+        }
+
+        return localIdent;
+    }
+
+    pushToResult({result, className, localIdent}) {
+        const {exportLocalsStyle, useLocalIdent} = this._cssLoaderConfig || {};
+        switch (exportLocalsStyle) {
             case 'camelCase':
                 result[className] = className;
                 result[camelCase(className)] = className;
@@ -29,7 +52,7 @@ module.exports = class Parser {
                 break;
 
             default:
-                result[className] = className;
+                result[className] = useLocalIdent ? `${localIdent}__${className}` : className;
         }
     }
 
@@ -40,6 +63,8 @@ module.exports = class Parser {
         let bracketsCount = 0;
         const result = {};
         const resultAnimations = {};
+
+        const localIdent = this.getLocalIdent(path);
 
         while (i < end) {
             if (i === -1) {
@@ -96,9 +121,9 @@ module.exports = class Parser {
                 while (!REG_EXP_NAME_BREAK_CHAR.test(css[i])) {
                     i++;
                 }
-                const word = css.slice(startWord, i);
+                const className = css.slice(startWord, i);
 
-                this.pushToResult(result, word);
+                this.pushToResult({result, className, localIdent});
                 continue;
             }
 
@@ -118,8 +143,9 @@ module.exports = class Parser {
                     i++;
                 }
 
-                const word = css.slice(startWord, i);
-                this.pushToResult(resultAnimations, word);
+                const className = css.slice(startWord, i);
+
+                this.pushToResult({result: resultAnimations, className, localIdent});
                 continue;
             }
 
